@@ -1,11 +1,9 @@
-from twisted.internet import reactor, stdio
 import sys
 import time
 from twisted.internet.protocol import Protocol, ClientFactory
-from twisted.protocols import basic
 import json
 import os
-from bn2.utils.msgqueue import create_local_task_message, INBOX_SYS_CRIT_MSG, INBOX_SYS_MSG, INBOX_TASK1_MSG, OUTBOX_SYS_MSG, OUTBOX_TASK_MSG
+from bn2.utils.msgqueue import create_local_task_message, INBOX_SYS_CRIT_MSG, INBOX_SYS_MSG, INBOX_TASK1_MSG, OUTBOX_SYS_MSG, OUTBOX_TASK_MSG, safe_copy_route_meta
 from bn2.comms import decoder
 
 from datetime import datetime, timedelta
@@ -37,6 +35,9 @@ class BotClientProtocol(Protocol):
                 for e in extracted:
                     e_json = json.loads(e)
                     self.send_to_inbox(e_json)
+            else:
+                self.factory.log.warning("Incomplete message buffer -- waiting...")
+
         except Exception as e:
             self.factory.log.critical("DR ERROR: {}".format(e))
             print(traceback.print_exc())
@@ -48,16 +49,18 @@ class BotClientProtocol(Protocol):
     def send_to_inbox(self, data):
             msg = None
             try:
-                msg = create_local_task_message(
-                    data['route'],
-                    data['data'],
-                    data['route_meta']
-                )
+                msg =  data
+                self.factory.log.debug("inbox << {}".format(msg['route']))
+
             except TypeError as e:
                 self.factory.log.critical("error {} with {}:\n{}\n".format(e, type(data), data))
                 raise e
+
             else:
-                self.factory.driver_inbox.put(msg, INBOX_SYS_MSG)
+                try:
+                    self.factory.driver.inbox.put(msg, INBOX_SYS_MSG)
+                except:
+                    exit()
 
     def connectionMade(self):
         self.connected = True
@@ -69,54 +72,59 @@ class BotClientProtocol(Protocol):
 
         self.send(json.dumps(msg))
 
-        msg1 = create_local_task_message(
+        msg1 = self.factory.driver.create_local_task_message(
             'bd.@sd.master.connected',
             {}
         )
 
-        self.factory.driver_inbox.put(msg1, INBOX_SYS_CRIT_MSG)
+        self.factory.driver.inbox.put(msg1, INBOX_SYS_CRIT_MSG)
 
 
     def connectionLost(self, s):
         self.connected = False
         self.factory.log.debug("connection lost with master")
-        msg1 = create_local_task_message(
+        msg1 = self.factory.driver.create_local_task_message(
             'bd.@sd.master.disconnected',
             {}
         )
 
-        self.factory.driver_inbox.put(msg1, INBOX_SYS_CRIT_MSG)
+        self.factory.driver.inbox.put(msg1, INBOX_SYS_CRIT_MSG)
 
     def send(self, payload):
-        self.transport.write((START_DEL+payload+END_DEL).encode('utf-8'))
+        self.transport.write ((START_DEL+payload+END_DEL).encode('utf-8'))
 
 
 class BotClientFactory(ClientFactory):
     protocol = BotClientProtocol
 
-    def __init__(self, uuid, driver_inbox, log):
-        self.client = None
-        self.driver_inbox = driver_inbox
+    def __init__(self, driver, uuid, log):
+        self.driver = driver
+        self.driver_inbox = driver.inbox
         self.uuid = uuid
         self.err_time = None
         self.log = log
-        self.log.set_path('bd.sd.comms')
-
+        self.log.set_path('bd.@sd.comms', check=False)
+        self.DISCONNECTED_WARNING = False
 
     def send_it(self, payload):
         if hasattr(self, 'p'):
-            self.log.debug("Sending payload to master [{}]...".format(payload['route']))
-            if type(payload) == dict:
-                payload = json.dumps(payload)
-
+            self.log.debug("OUTBOX >> {} callback[{}]...".format(payload['route'], payload['route_meta']['callback']))
+            meta = {}
+            safe_copy_route_meta(payload['route_meta'], meta, exclude=['msg_id', '_time_received'])
+            payload['route_meta'] = meta
+            payload = json.dumps(payload, default=lambda o: str(o))
             self.p.send(payload)
-        else:
-            msg1 = create_local_task_message(
-                'bd.@sd.master.disconnected',
-                {}
-            )
+            self.DISCONNECTED_WARNING = False
 
-            self.driver_inbox.put(msg1, INBOX_SYS_CRIT_MSG)
+        else:
+            if not self.DISCONNECTED_WARNING:
+                msg1 = self.driver.create_local_task_message(
+                    'bd.@sd.master.disconnected',
+                    {}
+                )
+
+                self.driver_inbox.put(msg1, INBOX_SYS_CRIT_MSG)
+                self.DISCONNECTED_WARNING = True
 
 
     def buildProtocol(self, addr):
@@ -126,7 +134,7 @@ class BotClientFactory(ClientFactory):
 
     def startedConnecting(self, connector):
         destination = connector.getDestination()
-        self.log.debug("<client> started Connecting destionation: {}".format(destination))
+        self.log.debug("Started trying to connect to Master @ {}:{}".format(destination.host, destination.port))
 
 
     def clientConnectionLost(self, connector, reason):
@@ -135,10 +143,17 @@ class BotClientFactory(ClientFactory):
 
         self.log.error("LOST CONNECTION {}".format(reason))
         try:
-            time.sleep(2)
+            self.driver.sleep(2000)
             connector.connect()
         except:
             connector.disconnect()
+            msg1 = self.driver.create_local_task_message(
+                'bd.@sd.master.disconnected',
+                {}
+            )
+
+            self.driver_inbox.put(msg1, INBOX_SYS_CRIT_MSG)
+
 
     def clientConnectionFailed(self, connector, reason):
         if hasattr(self, 'p'):
@@ -146,7 +161,7 @@ class BotClientFactory(ClientFactory):
 
         self.log.critical("CONNECTION FAILED {}".format(reason))
         try:
-            time.sleep(2)
+            self.driver.sleep(2000)
             connector.connect()
         except:
             connector.disconnect()

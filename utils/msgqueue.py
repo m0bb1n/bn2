@@ -3,6 +3,7 @@ import multiprocessing as multiprocess
 import threading
 import os
 import queue as Queue
+from queue import Full
 
 INBOX_SYS_CRITICAL_MSG = 0
 INBOX_SYS_CRIT_MSG = 0
@@ -12,10 +13,10 @@ INBOX_BLOCKING_MSG = 2
 INBOX_TASK1_MSG = 3
 INBOX_TASK2_MSG = 4
 
-OUTBOX_SYS_MSG = 1
+OUTBOX_SYS_MSG = 0
 OUTBOX_TASK_MSG = 1
 
-def create_global_task_message(self, route, data, *, task_id=None, job_id=None, route_meta={}):
+def create_global_task_message(self, route, data, *, task_id=None, job_id=None, route_meta=None, **kwargs):
     if not (task_id and job_id):
         raise ValueError("Either Task [{}] or Job [{}] is null")
     gdata = {
@@ -25,24 +26,43 @@ def create_global_task_message(self, route, data, *, task_id=None, job_id=None, 
             'data': data
         }
     }
+    if not route_meta:
+        route_meta = create_local_route_meta(**kwargs)
 
     route_meta.update({'task_id':task_id, 'job_id':job_id})
-    return create_local_task_message(route, gdata, route_meta=route_meta)
 
-def create_local_task_message(route, data, route_meta={}, origin=None):
+    return create_local_task_message(
+        route, gdata, route_meta=route_meta
+    )
+
+
+
+def safe_copy_route_meta(org, new, exclude=[], include=[]):
+    keys = org.keys()
+    if not len(include):
+        include = keys
+    for inc_k in include:
+        if inc_k in keys and not inc_k in exclude:
+            new[inc_k] = org[inc_k]
+
+def create_local_route_meta(*, is_process=False, callback=None, origin=None, token=None, local_route_secret=None):
+    _type = 'default'
+    if is_process:
+        _type = 'process'
+
+    return {'type': _type, 'origin':origin, 'token':token, "local_route_secret":local_route_secret, 'callback': callback}
+
+def create_local_task_message(route, data, *, route_meta=None, **kwargs):
     msg = {'route': route, 'data':data}
 
-    meta_keys = route_meta.keys()
 
-    if not 'type' in meta_keys:
-        route_meta['type'] = 'default'
-
-
+    meta = create_local_route_meta(**kwargs)
+    if route_meta:
+        safe_copy_route_meta(route_meta, meta)
 
 
-    if origin:
-        route_meta['origin'] = origin
-    msg['route_meta'] = route_meta
+    msg['route_meta'] = meta
+
 
     return msg
 
@@ -77,6 +97,8 @@ class PriorityQueue(object):
         for i in range(0, total_priorities):
             self.queues.append(obj())
 
+
+
     def get(self, priority=None, remove=True, get_priority=False, get_all=False):
         item = None
         items = []
@@ -85,7 +107,8 @@ class PriorityQueue(object):
                 if remove:
                     item = self.queues[priority].get_nowait()
                 else:
-                    item = self.queues[priority].queue[0]
+                    item = self.queues[priority].get_nowait()
+                    self.put_front(item, priority)
             except Queue.Empty:
                 pass
         else:
@@ -109,6 +132,21 @@ class PriorityQueue(object):
 
         return item
 
-    def put(self, item, priority):
+    def put(self, item, priority=None):
+        if priority==None:
+            priority= self.total_priorities-1
+
         self.queues[priority].put(item)
 
+    def put_front(self, item, priority):
+        q = self.queues[priority]
+        assert not q._closed, "Queue {0!r} has been closed".format(q)
+        if not q._sem.acquire(True, None):
+            raise Full
+
+        with q._notempty:
+            if q._thread is None:
+                q._start_thread()
+            q._buffer.appendleft(item)
+
+            q._notempty.notify()

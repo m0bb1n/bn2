@@ -1,4 +1,5 @@
 import logging
+import logging.handlers
 from termcolor import colored
 from sys import _getframe
 
@@ -40,104 +41,124 @@ class ColorFormatter (logging.Formatter):
 
 
 class Logger (object):
+    check=True
 
-
-    def __init__(self, path, color=False):
+    def __init__(self, path, color=False, to_file=None):
         self.__logger = logging.getLogger('bot'+__name__)
         self.__logger.setLevel(logging.DEBUG)
         stream_handler = logging.StreamHandler()
         stream_handler.setLevel(logging.DEBUG)
+
         if color:
             obj = ColorFormatter
         else:
             obj = logging.Formatter
         formatter = obj('[%(asctime)s]>[%(levelname)s]>[%(path)s]: %(message)s', "%m-%d %H:%M:%S")
+        if to_file:
+            out = '"t":"{}","l":"{}","p":"{}","m":"{}"'.format(
+                "%(asctime)s",
+                "%(levelname)s",
+                "%(path)s",
+                "%(message)s")
+
+            file_formatter = logging.Formatter('{'+out+'},', "%m-%d %H:%M:%S") #completes json
+            file_handler = logging.handlers.WatchedFileHandler(to_file)
+            file_handler.setFormatter(file_formatter)
+            self.__logger.addHandler(file_handler)
+
         stream_handler.setFormatter(formatter)
+
         self.__logger.addHandler(stream_handler)
 
         self.logger_data = {"path": path}
         self.color = color
 
 
-    def set_path(self, path):
+    def set_path(self, path, check=True):
         self.logger_data['path'] = path
+        self.check = check
 
     def debug(self, msg, path=None):
         data = self.logger_data
-        if path:
-                data = {'path':path}
-        else:
+        if not path and self.check:
             route_meta = None
             try:
                 route_meta = _getframe(1).f_locals['route_meta']
-                path = route_meta['route']
             except:
                 pass
             else:
-                data = {'path': path}
+                path = route_meta['route']
+
+        if path:
+            data = {'path': path}
+
         self.__logger.debug(msg, extra=data)
 
 
     def info(self, msg, path=None):
         data = self.logger_data
-        if path:
-                data = {'path':path}
-        else:
+
+        if not path and self.check:
             route_meta = None
             try:
                 route_meta = _getframe(1).f_locals['route_meta']
-                path = route_meta['route']
             except:
                 pass
             else:
-                data = {'path': path}
+                path = route_meta['route']
+
+        if path:
+            data = {'path': path}
+
         self.__logger.info(msg, extra=data)
 
 
     def warning(self, msg, path=None):
         data = self.logger_data
-
-        if path:
-                data = {'path':path}
-        else:
+        if not path and self.check:
             route_meta = None
             try:
                 route_meta = _getframe(1).f_locals['route_meta']
-                path = route_meta['route']
             except:
                 pass
             else:
-                data = {'path': path}
+                path = route_meta['route']
+
+        if path:
+            data = {'path': path}
+
         self.__logger.warning(msg, extra=data)
 
     def error(self, msg, path=None):
         data = self.logger_data
-        if path:
-                data = {'path':path}
-        else:
+        if not path and self.check:
             route_meta = None
             try:
                 route_meta = _getframe(1).f_locals['route_meta']
-                path = route_meta['route']
             except:
                 pass
             else:
-                data = {'path': path}
+                path = route_meta['route']
+
+        if path:
+            data = {'path': path}
+
         self.__logger.error(msg, extra=data)
 
     def critical(self, msg, path=None):
         data = self.logger_data
-        if path:
-                data = {'path':path}
-        else:
+        if not path and self.check:
             route_meta = None
             try:
                 route_meta = _getframe(1).f_locals['route_meta']
-                path = route_meta['route']
             except:
-                data = self.logger_data
+                pass
             else:
-                data = {'path': path}
+                path = route_meta['route']
+
+        if path:
+            data = {'path': path}
+
         self.__logger.critical(msg, extra=data)
 
 

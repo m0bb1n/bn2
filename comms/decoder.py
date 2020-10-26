@@ -10,7 +10,6 @@ def extract_buffer(dbuffer, start_index):
             ex = dbuffer[0][start_index:i]
             dbuffer[0] = dbuffer[0][i+len(END_DEL):]
             return ex
-    raise ValueError("EXTRACTED BUFFER INCORRECTLY")
 
 def check_buffer(dbuffer):
     extracted = []
@@ -19,9 +18,7 @@ def check_buffer(dbuffer):
 #            print(dbuffer[0][:len(START_DEL)]==START_DEL)
             ex = extract_buffer(dbuffer, len(START_DEL))
             if not ex:
-                #print("WOULD BREAK HERE")
-                continue
-                #break
+                break
             extracted.append(ex)
     return extracted
 
