@@ -1158,8 +1158,8 @@ class MasterDriver (BotDriver):
             has_extra_configs = 'true'
 
         return """#!/bin/bash
-        extract () {
-            #extracts files based on if zip/tar and strip root folder
+        extract () {{
+        #extracts files based on if zip/tar and strip root folder
             if (file $1 | grep -q "tar archive" ) ;
 
             then
@@ -1173,7 +1173,7 @@ class MasterDriver (BotDriver):
                 cp -r _tmp_dir/*/* $2/.
                 rm -r _tmp_dir
             fi
-        }
+        }}
 
         cd  /home/ubuntu
         sudo apt-get update
