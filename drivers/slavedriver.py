@@ -3,7 +3,7 @@ from bn2.comms.client import BotClientFactory
 from twisted.internet import reactor, task
 from bn2.drivers.botdriver import BotDriver, ASYNC_PRIORITY
 from datetime import datetime
-import threading
+import os
 
 
 
@@ -35,6 +35,7 @@ class SlaveDriver (BotDriver):
         self.add_route_mapping('bd.@sd.master.disconnected', self.bd_sd_master_disconnected, is_async=True)
         self.add_route_mapping('bd.@sd.task.global.start', self.bd_sd_task_global_start, is_async=True)
         self.add_route_mapping('bd.@sd.task.global.stop', self.bd_sd_task_global_stop, is_async=True)
+        self.add_route_mapping('bd.@sd.task.global.pids', self.bd_sd_task_global_pids, is_async=True, level="LOCAL")
         self.add_route_mapping('bd.@sd.master.pulse', self.bd_sd_master_pulse, is_async=True, level="LOCAL")
         self.add_route_mapping('bd.@sd.master.message', self.bd_sd_master_message, is_async=True, level="LOCAL")
         self.add_check_func(self.send_pulse_to_master, 1000*20)
@@ -146,12 +147,12 @@ class SlaveDriver (BotDriver):
 
 
     def run_global_task(self, data:dict, route_meta:dict) -> None:
+        self.RUNNING_GLOBAL_TASK_PID = os.getpid()
         task_id = route_meta['task_id']
         job_id = route_meta['job_id']
 
 
         #print("ROUTE_META: {}\n DRM:{}\n\n".format(route_meta, data))
-
 
 
         start_msg = self.create_local_task_message(
@@ -190,43 +191,59 @@ class SlaveDriver (BotDriver):
                 }
             )
             self.log.info("Completed Global Task [{}]".format(route_meta['task_id']), path='bd.@sd.task.global.handler')
+
+        stop_msg = self.create_local_task_message(
+            'bd.@sd.task.global.stop',
+            {"task_id": task_id}
+        )
+        self.inbox.put(stop_msg, INBOX_SYS_MSG)
+
         self.send_message_to_master(end_msg)
 
 
 
     def bd_sd_task_global_start(self, data, route_meta):
+        reject_task = True
         if not self.RUNNING_GLOBAL_TASK:
+
             self.RUNNING_GLOBAL_TASK = True
             self.RUNNING_ROUTE = data['route']
             self.RUNNING_TASK_ID = route_meta['task_id']
             self.RUNNING_JOB_ID = route_meta['job_id']
 
 
+            try:
+                task_process = self.create_func_process(
+                    self.run_global_task,
+                    data,
+                    route_meta
+                )
+                self.RUNNING_GLOBAL_TASK_PID = task_process.pid
 
-            self.run_global_task(data, route_meta)
+            except Exception as e:
+                self.log.error(e)
+                self.RUNNING_GLOBAL_TASK = False
+                self.RUNNING_ROUTE = None
+                self.RUNNING_TASK_ID = None
+                self.RUNNING_JOB_ID = None
 
-#            self.router(data['route'], data['data'], route_meta)
+            else:
+                reject_task = False
 
-            self.RUNNING_GLOBAL_TASK = False
-            self.RUNNING_TASK_ID = None
-            self.RUNNING_ROUTE = None
-            self.RUNNING_JOB_ID = None
-            pass
-        else:
+        if reject_task:
             self.log.error("Rejecting Task [{}] from Master because already running Task [{}]".format(route_meta['task_id'], self.RUNNING_TASK_ID))
             self.reject_global_task(route_meta['task_id'], route_meta['job_id'])
 
 
     def bd_sd_task_global_stop(self, data, route_meta):
         if data['task_id'] == self.RUNNING_TASK_ID and self.RUNNING_GLOBAL_TASK:
-            self.RUNNING_GLOBAL_TASK = False
-            self.RUNNING_TASK_ID = None
-            self.RUNNING_JOB_ID = None
-
             self.log.info("Stopping Task [{}] -- forced={}".format(self.RUNNING_TASK_ID, data.get('force', False)))
 
+
             if data.get('force', False):
+                pids = []
                 pids = self.global_task_info['pids']
+                pids.append(self.RUNNING_GLOBAL_TASK_PID)
                 if pids:
                     self.log.warning("Force stoping -- killing {} pids from global task: {}".format(len(pids), pids))
                 for pid in pids:
@@ -236,43 +253,14 @@ class SlaveDriver (BotDriver):
                     )
                     self.inbox.put(msg, INBOX_SYS_CRITICAL_MSG)
 
-                task_thread_id = self.global_task_info['thread_id']
-                if not task_thread_id:
-                    raise Exception("Couldn't stop task [{}] because didn't store thread id")
-
-                found = False
-
-                """
-                for id, thread in threading._active.items():
-                    if thread is self:
-                        return id
-                """
-
-                for thread_id, thread in threading._active.items():
-                    if thread_id == task_thread_id:
-                        found = True
-                        self.log.warning("Trying to abruptly stopping thread {}".format(thread_id))
-                        thread.stop()
-                        cnt = 0
-                        while(thread.isAlive() or cnt < 50):
-                            thread.stop(throw=False)
-                            self.sleep(100)
-                            cnt+=1
-
-                        self.log.warning("Stopped thread: {}".format(not thread.isAlive())) #maybe in future if still alive, pass local msg to try in a little
-
-                        t = self.create_route_runner_thread(ASYNC_PRIORITY, start=True)
-                        self.log.debug("Launching thread {} to replace".format(t.ident))
-
-                        thread.join()
-                        break
-
-                if not found:
-                    raise Exception("Couldn't find thread [{}]".format(thread_id))
+            self.RUNNING_GLOBAL_TASK = False
+            self.RUNNING_GLOBAL_TASK_PID = None
+            self.RUNNING_TASK_ID = None
+            self.RUNNING_JOB_ID = None
 
 
-
-
+    def bd_sd_task_global_pids(self, data, route_meta):
+        self.global_task_info['pids'].extend(data['pids'])
 
 
     def reject_global_task(self, task_id, job_id):
@@ -358,7 +346,7 @@ class SlaveDriver (BotDriver):
                     "bd.@sd.master.message",
                     {"msg":msg}
                 ),
-                delay=1.5
+                delay=3
             )
             return
         self.send_message_to_master(msg)

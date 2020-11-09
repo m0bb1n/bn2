@@ -102,6 +102,8 @@ class Echo(protocol.Protocol):
 
             else:
             #if not self.uuid and self.uuid in self.factory.connections.keys():
+
+                self.connected = False
                 self.transport.abortConnection()
                 #out = self.factory.driver.create_local_task_message('bd.@md.slave.lost', {'uuid':self.uuid})
                 #self.factory.driver.inbox.put(out,0)

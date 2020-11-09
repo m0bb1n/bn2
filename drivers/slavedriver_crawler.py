@@ -113,13 +113,17 @@ class CrawlerDriver (SlaveDriver):
         browser = self.create_browser(chrome_options, headless=headless)
         return browser
 
-    def create_browser(self, chrome_options, headless=False, is_global_task=True):
+    def create_browser(self, chrome_options, headless=False):
         browser = webdriver.Chrome(self.get_bot_config('chromedriver_exe_path'), chrome_options=chrome_options)
-        if is_global_task:
+        if self.RUNNING_GLOBAL_TASK and self.RUNNING_GLOBAL_TASK_PID==os.getpid():
             pid = browser.service.process.pid
             pids = [p.pid for p in psutil.Process(pid).children(recursive=True)]
             pids.append(pid)
-            self.global_task_info['pids'].extend(pids)
+            msg = self.create_local_task_message(
+                'bd.@sd.task.global.pids',
+                {"pids":pids}
+            )
+            self.inbox.put(msg, INBOX_SYS_MSG)
 
         return browser
 

@@ -191,17 +191,27 @@ class MasterDriver (BotDriver):
 
     def _init_master_configs(self):
         self.add_bot_config(
+            'bn2_private_key',
+            'BN2 Private RSA Key',
+            'text',
+            desc='DO NOT MODIFY',
+            grouping='networking'
+        )
+
+        self.add_bot_config(
             "is_only_lan",
             "Master only accepts connection from LAN slaves",
             "bool",
-            default=True
+            default=True,
+            grouping='networking'
         )
 
         self.add_bot_config(
             "bn2_lib_download_url",
             "BN2 Library download url",
             "url",
-            default=None
+            default=None,
+            grouping='aws'
         )
 
         self.add_bot_config(
@@ -230,14 +240,16 @@ class MasterDriver (BotDriver):
             "slave_init_grace",
             "Slave initialization grace period (seconds)",
             "number",
-            default=120
+            default=120,
+            grouping='aws'
         )
         self.add_bot_config(
             "slave_idle_grace",
             "Slave idle grace period (seconds)",
             "number",
             default=60*5,
-            desc="Max grace period between last worked on task"
+            desc="Max grace period between last worked on task",
+            grouping='aws'
         )
 
         self.add_bot_config(
@@ -245,7 +257,8 @@ class MasterDriver (BotDriver):
             'Enable master log upload',
             'bool',
             default=True,
-            desc='Allows you to view master logs in Control Panel'
+            desc='Allows you to view master logs in Control Panel',
+            grouping='debug'
         )
 
         self.add_bot_config(
@@ -272,7 +285,8 @@ class MasterDriver (BotDriver):
             'Persistent task data',
             'bool',
             desc='Store task data after job ends.  Used to help debugging.',
-            default=True
+            default=True,
+            grouping='debug'
         )
 
         self.add_bot_config(
@@ -284,17 +298,10 @@ class MasterDriver (BotDriver):
         self.add_bot_config(
             'master_db_address',
             'Master Database Address/File path',
-            'str',
-            default=os.path.join(os.getcwd(), 'master.db')
+            'str'
         )
 
 
-        self.add_bot_config(
-            'bn2_private_key',
-            'BN2 Private RSA Key',
-            'text',
-            desc='DO NOT MODIFY',
-        )
 
 
         self.load_bot_config_from_file()
@@ -1257,7 +1264,6 @@ class MasterDriver (BotDriver):
         #self.send_comm_cmd("del_connection", target_uuid=uuid)
 
     def bd_md_network_destruct(self, data, route_meta, token):
-        print(token)
         username = token.get('username', None)
         if not username:
             username = "MASTER"
@@ -1676,7 +1682,7 @@ class MasterDriver (BotDriver):
 
             job_report.content = content
             session.commit()
-            self.log.debug("Job [{}] has generated Report [{}]:\n{}".format(data['job_id'], job_report.id, job_report.content))
+            self.log.debug("Job [{}] has generated Report [{}]: {} chars".format(data['job_id'], job_report.id, len(job_report.content)))
 
     def bd_md_slave_job_report_keys_set(self, data, route_meta):
         with self.master_db.scoped_session() as session:
@@ -1870,7 +1876,7 @@ class MasterDriver (BotDriver):
                 vars_ = ",".join(
                     ["{}={}".format( c, eval(c, scope)) for c in ["is_started", "is_completed", "is_assigned"] if eval(c, scope)!=None]
                 )
-                self.log.debug("Task [{}] was flagged -- {}".format(data['task_id'], vars_))
+                self.log.debug("Task [{}] was flagged -- Checking if: {}".format(data['task_id'], vars_))
                 self._slave_task_error(task_id=data['task_id'], time_ended=datetime.utcnow(), msg=err_msg, session=session)
 
     def bd_md_slave_task_error(self, data, route_meta):
@@ -1976,7 +1982,6 @@ class MasterDriver (BotDriver):
             scheduler_group_id = None
             schedulers = []
             scheduler_group_ids = []
-            print(scheduler_group_ids)
 
 
             if 'scheduler_group_ids' in data.keys():
@@ -2017,9 +2022,9 @@ class MasterDriver (BotDriver):
             raise ValueError("Slave [{}] does not exist".format(slave_id))
 
         if not working:
-            if slave.assigned_task_id:
+            if slave.assigned_task_id and force_stop:
                 self.stop_slave_global_task(slave.uuid, slave.assigned_task_id, force=force_stop)
-                slave.assigned_task_id = None
+            slave.assigned_task_id = None
 
         else:
             if not task_id:

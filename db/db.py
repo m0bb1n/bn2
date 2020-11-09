@@ -62,7 +62,8 @@ class DBWrapper (object):
         elif sql_type == 'sqlite':
             engine_name = 'sqlite:///'
             connect_args['check_same_thread'] =scoped_thread
-            #print("SQLALCHEMY IS USING SQLITE AND NOT CHECKING SAME THREAD")
+        else:
+            raise ValueError("Unknown engine type: {}".format(sql_type))
 
         engine_name = engine_name + file_
 

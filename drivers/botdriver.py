@@ -405,14 +405,16 @@ class BotDriver (object):
             'master_ip',
             'Master IP',
             'str',
-            default='0.0.0.0'
+            default='127.0.0.1',
+            grouping='networking'
         )
 
         self.add_bot_config(
             'master_port',
             'Master Port',
             'number',
-            default=5600
+            default=5600,
+            grouping='networking'
         )
 
         self.add_bot_config(
@@ -420,6 +422,7 @@ class BotDriver (object):
             'BN2 Public RSA Key',
             'text',
             desc='DO NOT MODIFY',
+            grouping='networking'
         )
 
 
@@ -639,14 +642,17 @@ class BotDriver (object):
         if KILL:
             raise NotImplemented
 
-    def create_route_process(self, route, data, route_meta, daemon=False):
+    def create_func_process(self, func, *args, daemon=False) -> multiprocessing.Process:
         process = multiprocessing.Process(
-            target=self.router,
-            args=(route, data, route_meta)
+            target=func,
+            args=tuple(args)
         )
         process.daemon = daemon
         process.start()
         return process
+
+    def create_route_process(self, route, data, route_meta, daemon=False) -> multiprocessing.Process:
+        return self.create_func_process(self.router, route, data, route_meta, daemon=daemon)
 
     def run_router_msg(self, msg):
         route_meta = {}
