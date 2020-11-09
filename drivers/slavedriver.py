@@ -397,7 +397,7 @@ class SlaveDriver (BotDriver):
             rows = [row]
         if not name:
             name = 'Modifying table "{}" in warehouse'.format(table_name)
-        name+= ' [{} row(s)]'.format(len(rows))
+            name+= ' [{} row(s)]'.format(len(rows))
 
         payload = {'table_name': table_name, 'rows':rows, 'overwrite': overwrite}
         self.add_global_task('bd.sd.@WCv2.model.update', payload, name, job_id=job_id)
