@@ -226,6 +226,7 @@ class MasterDriver (BotDriver):
             "aws_ec2_image_id_slave",
             "Default EC2 image_id for slaves",
             "str",
+            default='ami-0e82959d4ed12de3f', #ubuntu 18.04
             grouping='aws'
         )
 
@@ -1107,7 +1108,7 @@ class MasterDriver (BotDriver):
             )[0]
         except Exception as e:
             error = e
-            self.set_bot_config("use_slave_host_ec2", False)
+            #self.set_bot_config("use_slave_host_ec2", False)
             self.log.error(e)
             err_msg = str(e)
 
@@ -1157,6 +1158,23 @@ class MasterDriver (BotDriver):
             has_extra_configs = 'true'
 
         return """#!/bin/bash
+        extract () {
+            #extracts files based on if zip/tar and strip root folder
+            if (file $1 | grep -q "tar archive" ) ;
+
+            then
+                tar -xvf $1 --one-top-level=$2 --strip-components 1
+                echo "is tar"
+            elif (file $1 | grep -q "Zip archive") ;
+            then
+                echo "is zip"
+                unzip $1 -d _tmp_dir
+                mkdir $2
+                cp -r _tmp_dir/*/* $2/.
+                rm -r _tmp_dir
+            fi
+        }
+
         cd  /home/ubuntu
         sudo apt-get update
         sudo apt-get install python3-pip -y
@@ -1175,14 +1193,13 @@ class MasterDriver (BotDriver):
             echo -n ',{extra_cfgs}]' >> configs.json
         fi
 
-        #download slave lib here
+        #download slave lib and extract here
+        wget {slave_url} -O slave.archive
+        extract slave.archive slave
 
-        wget {slave_url} -O slave.tar.gz
-        tar -xvf slave.tar.gz --one-top-level=slave --strip-components 1
-
-        #download bn2 lib here
-        wget {bn2_lib_url} -O bn2.tar.gz
-        tar -xvf bn2.tar.gz --one-top-level=bn2 --strip-components 1
+        #download bn2 lib and extract here
+        wget {bn2_lib_url} -O bn2.archive
+        extract bn2.archive bn2
 
         ln -s -f /home/ubuntu/bn2 /home/ubuntu/slave/.
 
