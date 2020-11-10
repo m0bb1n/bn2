@@ -148,9 +148,12 @@ class SlaveDriver (BotDriver):
 
 
     def run_global_task(self, data:dict, route_meta:dict) -> None:
+
         self.RUNNING_GLOBAL_TASK_PID = os.getpid()
         task_id = route_meta['task_id']
         job_id = route_meta['job_id']
+
+        self.set_process_name("jid#{}tid#{}".format(job_id, task_id))
 
 
         #print("ROUTE_META: {}\n DRM:{}\n\n".format(route_meta, data))
@@ -222,8 +225,7 @@ class SlaveDriver (BotDriver):
                 self.RUNNING_GLOBAL_TASK_PID = task_process.pid
 
             except Exception as e:
-                self.log.error(e)
-                self.log.error(traceback.print_exc())
+                self.log.error(traceback.format_exc())
                 self.RUNNING_GLOBAL_TASK = False
                 self.RUNNING_ROUTE = None
                 self.RUNNING_TASK_ID = None
