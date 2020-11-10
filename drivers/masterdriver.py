@@ -1317,7 +1317,7 @@ class MasterDriver (BotDriver):
                 if task:
                     if task.error or task.completed:
                         self.log.warning("DB did not release Slave [{}] on task error/completion -- doing it now.".format(slave.id))
-                        self.slave_is_working(slave, working=False)
+                        self.slave_is_working(slave, working=False, session=session)
                         SEND_STOP_TASK = False
                     else:
                         self.log.warning("DB reports Slave [{}] is assigned to {} but slave returns working={} -- could be that msg is yet to be processed".format(slave.id, slave.assigned_task_id, running_slave_task))

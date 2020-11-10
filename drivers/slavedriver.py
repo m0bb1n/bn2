@@ -1,5 +1,6 @@
 from bn2.utils.msgqueue import create_local_task_message, INBOX_SYS_CRITICAL_MSG, INBOX_SYS_MSG, OUTBOX_TASK_MSG, OUTBOX_SYS_MSG
 from bn2.comms.client import BotClientFactory
+import traceback
 from twisted.internet import reactor, task
 from bn2.drivers.botdriver import BotDriver, ASYNC_PRIORITY
 from datetime import datetime
@@ -222,6 +223,7 @@ class SlaveDriver (BotDriver):
 
             except Exception as e:
                 self.log.error(e)
+                self.log.error(traceback.print_exc())
                 self.RUNNING_GLOBAL_TASK = False
                 self.RUNNING_ROUTE = None
                 self.RUNNING_TASK_ID = None
@@ -231,7 +233,7 @@ class SlaveDriver (BotDriver):
                 reject_task = False
 
         if reject_task:
-            self.log.error("Rejecting Task [{}] from Master because already running Task [{}]".format(route_meta['task_id'], self.RUNNING_TASK_ID))
+            self.log.error("Rejecting Task [{}] from Master because already running Task [{}] -- If 'None' it failed".format(route_meta['task_id'], self.RUNNING_TASK_ID))
             self.reject_global_task(route_meta['task_id'], route_meta['job_id'])
 
 
