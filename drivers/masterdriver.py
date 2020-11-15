@@ -13,6 +13,7 @@ from sqlalchemy import and_, or_, event
 from bn2.db.db import DBWrapper
 from bn2.db import masterdb
 import os
+import urllib.parse
 from datetime import datetime, timedelta
 import boto3
 
@@ -227,6 +228,7 @@ class MasterDriver (BotDriver):
             "Default EC2 image_id for slaves",
             "str",
             default='ami-0e82959d4ed12de3f', #ubuntu 18.04
+            desc="""Recommended to use ubuntu 18.04 image id best performance -- Default is ubuntu 18.04""",
             grouping='aws'
         )
 
@@ -234,6 +236,17 @@ class MasterDriver (BotDriver):
             "aws_ec2_security_group_slave",
             "Default EC2 security group for slaves",
             "str",
+            desc="""Default security group for slaves launched dynamically.
+            To SSH into slaves, make sure to allow INBOUND connections on PORT 22.
+            Found in "Network & Security" tab on the EC2 console.""",
+            grouping='aws'
+        )
+
+        self.add_bot_config(
+            "aws_ec2_key_pair_slave",
+            "SSH key pair name for EC2 slaves",
+            "str",
+            desc='SSH key pair you created or imported. Found in "Network & Security" tab on the EC2 console.',
             grouping='aws'
         )
 
@@ -477,7 +490,7 @@ class MasterDriver (BotDriver):
                 if not slave:
                     raise ValueError("Unknown Slave [{}]".format(slave_id))
 
-                if slave.active:
+                if slave.active and slave.init:
                     slave_uuids.append(slave.uuid)
 
 
@@ -1029,7 +1042,12 @@ class MasterDriver (BotDriver):
 
 
     def bd_md_tag_send(self, data, route_meta):
-        msg = create_local_task_message("@bd.tag.add", {"tag":data["tag"], "data": data["data"]}, route_meta=route_meta)
+        tag_data = data.get('data', None)
+        tag_datas = data.get('datas', [])
+        if tag_data:
+            tag_datas.append(tag_data)
+
+        msg = create_local_task_message("@bd.tag.add", {"tag":data["tag"], "datas": tag_datas}, route_meta=route_meta)
         self.send_message_to(self.get_tag_uuid(data['tag']), msg, from_uuid=route_meta['origin'])
 
     def bd_md_slave_launch(self, data, route_meta):
@@ -1048,8 +1066,9 @@ class MasterDriver (BotDriver):
                 TMP solution to launch multiple ec2 instances at once
                 Will change to using cpv2 as a middle man for initilization
                 """
-                for i in range(0, cnt):
-                    self.launch_ec2_instance(data['slave_type_id'], session=session)
+                #for i in range(0, cnt):
+                #    self.launch_ec2_instance(data['slave_type_id'], session=session)
+                self.launch_ec2_instances(data['slave_type_id'], cnt, session=session)
             else:
                 raise ValueError("Unknown slave host type")
 
@@ -1076,7 +1095,7 @@ class MasterDriver (BotDriver):
             "is_ec2": True,
             "uuid": slave_uuid,
             "ec2_instance_id": None,
-            "active": False,
+            "active": True,
             "is_init": False,
             "slave_type_id": slave_type_id
         }
@@ -1103,7 +1122,7 @@ class MasterDriver (BotDriver):
                 MinCount=1, MaxCount=1,
                 InstanceType='t2.micro',
                 SecurityGroupIds=[self.get_bot_config("aws_ec2_security_group_slave")],
-                KeyName='awskey',
+                KeyName=self.get_bot_config("aws_ec2_key_pair_slave"),
                 TagSpecifications=[{'ResourceType': 'instance', 'Tags':[{'Key':'launch-type', 'Value': 'master'}]}]
             )[0]
         except Exception as e:
@@ -1111,17 +1130,16 @@ class MasterDriver (BotDriver):
             #self.set_bot_config("use_slave_host_ec2", False)
             self.log.error(e)
             err_msg = str(e)
+            slave.active = False
 
         if ec2_slave:
             #slave_info['active'] = True
             #slave_info['last_pulse'] = datetime.utcnow()+timedelta(seconds=self.get_bot_config("slave_init_grace"))
             #slave_info['ec2_instance_id'] = ec2_slave.instance_id
-
-            slave.active = True
             slave.ip = ec2_slave.public_ip_address
             slave.last_pulse = datetime.utcnow()+timedelta(seconds=self.get_bot_config("slave_init_grace"))
             slave.ec2_instance_id = ec2_slave.instance_id
-            session.commit()
+        session.commit()
 
 
         if not ec2_slave:
@@ -1150,6 +1168,87 @@ class MasterDriver (BotDriver):
             raise ValueError("EC2 Resource wasn't initialized correctly -- Restart master")
 
         return True
+    def create_ec2_start_script_multiple(self, configs_download_url=None, slave_download_url=None, creds_download_url=None, extra_configs=[]):
+        has_extra_configs = 'false'
+        if len(extra_configs) > 0:
+            extra_configs = ",".join(json.dumps(c) for c in extra_configs)
+            has_extra_configs = 'true'
+
+        APPEND_JSON_CMD = """
+        qt='"' #dirty trick for double quotes... ahh bash :)
+        echo -n ",{${qt}key${qt}:${qt}token${qt},${qt}value${qt}:${qt}$token${qt}},{${qt}key${qt}:${qt}uuid${qt},${qt}value${qt}:${qt}$uuid${qt}}]" >> configs.json
+        """
+
+        return """#!/bin/bash
+        extract () {{
+        #extracts files based on if zip/tar and strip root folder
+            if (file $1 | grep -q "tar archive" ) ;
+
+            then
+                tar -xvf $1 --one-top-level=$2 --strip-components 1
+                echo "is tar"
+            elif (file $1 | grep -q "Zip archive") ;
+            then
+                echo "is zip"
+                unzip $1 -d _tmp_dir
+                mkdir $2
+                cp -r _tmp_dir/*/* $2/.
+                rm -r _tmp_dir
+            fi
+        }}
+
+        cd  /home/ubuntu
+        sudo apt-get update
+        sudo apt-get install python3-pip unzip -y
+
+        wget {cfgs_url} -O configs.json
+        wget {creds_url} -O creds.txt
+
+        #this allows us to append to json config file correctly
+        if     [ -n "$(tail -c1 configs.json)" ]
+        then
+            truncate -s-1 configs.json
+        else
+            truncate -s-2 configs.json
+        fi
+
+        if {has_extra_cfgs}
+        then
+            echo -n ',{extra_cfgs}' >> configs.json
+        fi
+
+        uuid=$(cat creds.txt | sed -n "1 p")
+        token=$(cat creds.txt | sed -n "2 p")
+
+        {json_cmd}
+
+        #download slave lib and extract here
+        wget {slave_url} -O slave.archive
+        extract slave.archive slave
+
+        #download bn2 lib and extract here
+        wget {bn2_lib_url} -O bn2.archive
+        extract bn2.archive bn2
+
+        ln -s -f /home/ubuntu/bn2 /home/ubuntu/slave/.
+
+        sudo pip3 install -r slave/requirements.txt
+        bash slave/setup.sh
+
+        ## this will install pip and apt-get items needed
+
+        python3 slave/slave.py configs.json &
+
+        """.format(
+            cfgs_url=configs_download_url,
+            has_extra_cfgs=has_extra_configs,
+            extra_cfgs=extra_configs,
+            slave_url=slave_download_url,
+            creds_url=creds_download_url,
+            bn2_lib_url=self.get_bot_config("bn2_lib_download_url"),
+            json_cmd=APPEND_JSON_CMD
+        )
+
 
     def create_ec2_start_script(self, configs_download_url=None, slave_download_url=None, extra_configs=[]):
         has_extra_configs = 'false'
@@ -1177,7 +1276,7 @@ class MasterDriver (BotDriver):
 
         cd  /home/ubuntu
         sudo apt-get update
-        sudo apt-get install python3-pip -y
+        sudo apt-get install python3-pip unzip -y
 
         wget {cfgs_url} -O configs.json
 
@@ -1240,11 +1339,89 @@ class MasterDriver (BotDriver):
 
     @DBWrapper.scoped_session_func(attr='master_db')
     def launch_ec2_instances(self, slave_type_id, cnt=1, *, cfgs_url=None, slave_url=None, session=None):
+        error = None
         self.allowed_to_launch_ec2_instances()
-        cpv2_slave  = session.query(masterdb.Slave).filter(masterdb.Slave.id==self.MASTER_DB_SLAVE_TYPE_CPV2_ID, self.filter_slave_is_ready).first()
+
+        slave_url, cfgs_url = self.check_slave_type_download_urls(slave_type_id, slave_url, cfgs_url, session=session)
+        cpv2_slave  = session.query(masterdb.Slave).filter(masterdb.Slave.slave_type_id==self.MASTER_DB_SLAVE_TYPE_CPV2_ID, self.filter_slave_is_ready).first()
+        slaves = []
         if not cpv2_slave:
             raise ValueError("CPv2 slave type needs to be online to launch more than 5 instances")
 
+
+        added_cfgs = [
+            {"key": "master_ip", "value": self.get_bot_config("master_ip")},
+            {"key": "master_port", "value": self.get_bot_config("master_port")}
+        ]
+
+        launch_tag = self.create_tag(cpv2_slave.uuid)
+        creds_url = urllib.parse.quote("{}/api/slaves/launched/{}".format(
+            cpv2_slave.ip,
+            launch_tag
+        ))
+
+        for i in range(0, cnt):
+            slave_info = {
+                "is_ec2": True,
+                "uuid": self.create_bot_uuid(),
+                "ec2_instance_id": None,
+                "active": True,
+                "is_init": False,
+                "slave_type_id": slave_type_id
+            }
+            slaves.append(session.scoped.add_model(masterdb.Slave, slave_info))
+        session.commit()
+
+
+        ec2_slaves = []
+        try:
+            ec2_slaves = self.ec2_resource.create_instances(
+                ImageId=self.get_bot_config("aws_ec2_image_id_slave"), #ubuntu 18
+                UserData=self.create_ec2_start_script_multiple(
+                    extra_configs=added_cfgs,
+                    configs_download_url=cfgs_url,
+                    slave_download_url=slave_url,
+                    creds_download_url=creds_url
+                ),
+                MinCount=1, MaxCount=cnt,
+                InstanceType='t2.micro',
+                SecurityGroupIds=[self.get_bot_config("aws_ec2_security_group_slave")],
+                KeyName=self.get_bot_config("aws_ec2_key_pair_slave"),
+                TagSpecifications=[{'ResourceType': 'instance', 'Tags':[{'Key':'launch_tag', 'Value': launch_tag}]}]
+            )
+        except Exception as e:
+            error = e
+            err_msg = str(e)
+
+            traceback.print_exc()
+
+        if ec2_slaves:
+            got_cnt = len(ec2_slaves)
+            self.log.debug("Got {} AWS EC2 instances".format(got_cnt))
+            if got_cnt != cnt:
+                self.log.warning("AWS EC2 only launched {} instances when requested {}".format(got_cnt, cnt))
+                for j in range(0, cnt-got_cnt):
+                    slave = slaves.pop(j*-1)
+                    slave.active = False
+
+
+            launcher_group = []
+            for i in range(0, got_cnt):
+                slave = slaves[i]
+                ec2_slave = ec2_slaves[i]
+                slave.ip = ec2_slave.public_ip_address
+                slave.last_pulse = datetime.utcnow()+timedelta(seconds=self.get_bot_config("slave_init_grace"))
+                slave.ec2_instance_id = ec2_slave.instance_id
+
+                slave_token = self.create_route_token(slave.uuid, *SLAVE_LEVEL_GROUP, slave=slave)
+                launcher_group.append({"token":slave_token, "uuid":slave.uuid})
+
+            session.commit()
+            self.log.info("SENDING TO LANUCH TAG: {}".format(launch_tag))
+            self.send_tag_data(launch_tag, *launcher_group)
+
+        if error:
+            raise error
 
     def bd_md_slave_kill(self, data, route_meta):
         uuid = data.get('uuid', None)
@@ -1267,7 +1444,6 @@ class MasterDriver (BotDriver):
             raise NotImplemented("slave [{}] doesn't exist".format(slave_id))
 
 
-        self.stop_slave_global_task(uuid, None, force=True)
         if not err_msg:
             err_msg = 'Killed by master'
 
@@ -1442,7 +1618,9 @@ class MasterDriver (BotDriver):
 
         self.log.warning("Slave [{}] {}".format(iden, msg))
 
-        self.remove_slaves(_id=_id, uuid=uuid, err_msg=msg, send_comm_cmd=not data.get('from_comms', False))
+        send_ = not data.get('from_comms', False) #wont send cmds if from comms
+
+        self.remove_slaves(_id=_id, uuid=uuid, err_msg=msg, send_comm_cmd=send_, send_kill_slave=send_)
 
 
     def bd_md_user_add(self, data, route_meta):
@@ -1532,6 +1710,7 @@ class MasterDriver (BotDriver):
 
         self.log.debug("Verified Slave [{}] -- Marking as active".format(token['slave_id']))
 
+
         with self.master_db.scoped_session() as session:
             slave = session.query(masterdb.Slave).filter(masterdb.Slave.id==token['slave_id']).first()
             if not slave:
@@ -1545,9 +1724,21 @@ class MasterDriver (BotDriver):
                 slave.is_init = True
                 slave.ip = data['ip']
 
+                #may remove if to slow
+                self.ec2_resource.create_tags(
+                    Resources=[slave.ec2_instance_id],
+                    Tags=[
+                        {'Key': 'slave.id', 'Value': str(slave.id)},
+                        {'Key': 'bot.type', 'Value': 'slave'},
+                        {'Key': 'slave.type.id', 'Value': str(slave.slave_type_id)},
+                        {'Key': 'Name', 'Value': 'sd-'+str(slave.id)}
+                    ]
+                )
+
 
             slave.active = True
             session.commit()
+
 
     def bd_md_slave_register(self, data, route_meta):
         self.log.debug('Slave {} sent registering information {}'.format(route_meta['origin'], data))

@@ -347,7 +347,7 @@ class BotDriver (object):
 
             except Exception as e:
                 self.log.error("check_route_level error: {}".format(e), path='def check_route_level')
-                print(traceback.print_exc())
+                traceback.print_exc()
                 authenticated = False
 
 
@@ -618,7 +618,12 @@ class BotDriver (object):
         self.log.critical("ECHOOOOING: {}".format(data))
 
     def bd_tag_add(self, data, route_meta):
-        self.tag_inbox.put(data)
+        datas = data.get('datas', [])
+        data_ = data.get('data', None)
+        if data_:
+            datas.append(data_)
+
+        self.send_tag_data(data['tag'], *datas)
 
     def bd_usage(self, data, route_meta):
         self.handle_bot_usage(data)
@@ -718,13 +723,10 @@ class BotDriver (object):
                 #self.report_error('bd.router.err', msg)
             else:
                 error = "KeyError issue in code: '{}'".format(e)
-                print(traceback.print_exc())
-                #self.report_error('bd.router.unk_err', msg)
 
         except Exception as e:
             error = str(e)
-            print(traceback.print_exc())
-            #self.report_error('bd.router.unk_err', msg)
+            self.log.error(traceback.format_exc(), path='@bd.router')
 
         else:
             error = None
@@ -820,7 +822,7 @@ class BotDriver (object):
             return tag.split('@')[1]
         raise TypeError("str '{}' is not a tag".format(tag))
 
-    def create_tag(self) -> str:
+    def create_tag(self, uuid=None) -> str:
         #in the future when task id is assigned to current self, this func can be created by local tasks
         #using random generater based on time rather
 
@@ -836,28 +838,34 @@ class BotDriver (object):
         if not SET:
             id_ +='anon'
 
-        return '#{}@{}'.format(id_, self.uuid)
+        if not uuid:
+            uuid = self.uuid
+        return '#{}@{}'.format(id_, uuid)
 
-    def send_tag_data(self, tag, data):
+    def send_tag_data(self, tag, *datas):
         uuid = self.get_tag_uuid(tag)
-        out = {
-            "tag": tag,
-            "data": data
-        }
         if uuid == self.uuid:
-            self.tag_inbox.put(out)
+            for data in datas:
+                self.tag_inbox.put({"tag":tag, "data": data})
             return
 
-        msg = create_local_task_message('@bd.tag.add', out)
-        self.send_message_to(uuid, msg)
+        msg = create_local_task_message("bd.@md.tag.send", {"tag":tag, "datas":datas})
+        if self.BOT_TYPE == "MASTER":
+            self.inbox.put(msg, INBOX_SYS_MSG)
+        elif self.BOT_TYPE == "SLAVE":
+            self.send_message_to_master(msg)
+        else:
+            raise NotImplemented
 
 
-    def get_tag_data(self, tag:str, delay:int,  *, get_all:bool=False, raise_error:bool=False, err_msg=None):
+    def get_tag_data(self, tag:str, delay:int=0, *, get_all:bool=False, raise_error:bool=False, err_msg=None):
         if self.get_tag_uuid(tag) != self.uuid:
             raise ValueError("Cannot access foreign slave's tag data: "+tag)
 
         CHECK_DELAY = 500
-        poll = int(delay*1000/CHECK_DELAY)
+        poll = 1
+        if delay != 0:
+            poll = int(delay*1000/CHECK_DELAY)
         for i in range(0, poll):
             if i: #delay after first poll
                 self.sleep(CHECK_DELAY)
@@ -988,7 +996,7 @@ class BotDriver (object):
 
             route_priority = SYNC_PRIORITY
             if msg['route'] == '@bd.tag.add':
-                self.tag_inbox.put(msg['data'])
+                self.run_router_msg(msg)
                 return
 
             if self.is_route_async(msg['route'], throw=False):
@@ -1039,7 +1047,7 @@ class BotDriver (object):
                 self.RUNNING = False
 
             except Exception as e:
-                self.log.critical(traceback.print_exc(), path='bd.loop')
+                self.log.critical(traceback.format_exc(), path='bd.loop')
                 raise e
             else:
                 pass
