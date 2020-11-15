@@ -49,7 +49,8 @@ class Echo(protocol.Protocol):
     def connectionLost(self, reason):
         #self.factory.log.debug('</> (Lost {}) bc: {}'.format(self.uuid, reason))
         if self.uuid:
-            out = self.factory.driver.create_local_task_message('bd.@md.slave.lost', {'uuid':self.uuid, 'err_msg':"lost connection"})
+
+            out = self.factory.driver.create_local_task_message('bd.@md.slave.lost', {'uuid':self.uuid, 'from_comms':True, 'err_msg': reason})
             self.factory.driver.inbox.put(out,0)
 
             if self.uuid in self.factory.connections.keys():
@@ -194,7 +195,7 @@ class BotServerFactory(protocol.Factory):
         except KeyError:
             if not uuid in self.recent_error_uuids:
                 self.recent_error_uuids.append(uuid)
-                out = self.driver.create_local_task_message('bd.@md.slave.lost', {'uuid':uuid, 'from_comms':True})
+                out = self.driver.create_local_task_message('bd.@md.slave.lost', {'uuid':uuid, 'from_comms':True, 'err_msg': 'no active connection'})
                 self.driver_inbox.put(out,INBOX_SYS_MSG)
                 self.log.error("Slave [{}] doesn't have an active connection -- Can't send route '{}'".format(uuid, payload['data']['route']))
 
