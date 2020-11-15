@@ -1019,11 +1019,13 @@ class MasterDriver (BotDriver):
             for slave in slaves:
                 inactive = False
 
-                if (slave.last_pulse + timedelta(seconds=60)) <= now:
-                    inactive = True
-                elif not slave.is_init:
+                if not slave.is_init:
                     if (slave.first_pulse + timedelta(seconds=self.get_bot_config("slave_init_grace") )) <= now:
                         inactive = True
+
+                elif (slave.last_pulse + timedelta(seconds=60)) <= now:
+                    inactive = True
+
 
                 if inactive:
                     inactive_slaves.append(slave)
@@ -1401,7 +1403,7 @@ class MasterDriver (BotDriver):
             if got_cnt != cnt:
                 self.log.warning("AWS EC2 only launched {} instances when requested {}".format(got_cnt, cnt))
                 for j in range(0, cnt-got_cnt):
-                    slave = slaves.pop(j*-1)
+                    slave = slaves.pop(-1)
                     slave.active = False
 
 
