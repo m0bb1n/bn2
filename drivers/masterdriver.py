@@ -1395,16 +1395,16 @@ class MasterDriver (BotDriver):
             error = e
             err_msg = str(e)
 
-            traceback.print_exc()
+        got_cnt = len(ec2_slaves)
+        self.log.debug("Got {} AWS EC2 instances".format(got_cnt))
+        if got_cnt != cnt:
+            self.log.warning("AWS EC2 only launched {} instances when requested {}".format(got_cnt, cnt))
+            for j in range(0, cnt-got_cnt):
+                slave = slaves.pop(-1)
+                slave.active = False
+            session.commit()
 
         if ec2_slaves:
-            got_cnt = len(ec2_slaves)
-            self.log.debug("Got {} AWS EC2 instances".format(got_cnt))
-            if got_cnt != cnt:
-                self.log.warning("AWS EC2 only launched {} instances when requested {}".format(got_cnt, cnt))
-                for j in range(0, cnt-got_cnt):
-                    slave = slaves.pop(-1)
-                    slave.active = False
 
 
             launcher_group = []
@@ -1590,7 +1590,10 @@ class MasterDriver (BotDriver):
                 if slave.ec2_instance_id:
                     ec2_ids.append(slave.ec2_instance_id)
         if ec2_ids:
-            self.terminate_ec2_instances(*ec2_ids)
+            try:
+                self.terminate_ec2_instances(*ec2_ids)
+            except Exception as e:
+                self.log.error(e, path='def remove_slaves')
 
         session.commit()
 
@@ -2263,11 +2266,17 @@ class MasterDriver (BotDriver):
         self.send_message_to(uuid, msg, OUTBOX_SYS_MSG)
 
     def bd_md_Slave_CPv2_redirected(self, data, route_meta, token):
+        data['route_meta']['is_redirect'] = True
+        data['route_meta']['redirect_msg_id'] = data['__redirect_msg_id']
+        data['route_meta']['redirect_sid'] = data['sid']
+        data['route_meta']['redirect_origin'] = token['origin']
+
         msg = create_local_task_message(data['route'], data['data'], route_meta=data['route_meta'])
         self.inbox.put(msg, priority=INBOX_TASK1_MSG)
         self.alert_CPv2(
             data['__redirect_msg'],
-            go_to='/jobs', persist=False,
+            go_to=None,
+            persist=False,
             session_id=data['sid'],
             slave_uuid=token['origin'],
             color='grey darken-2',

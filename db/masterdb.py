@@ -356,6 +356,13 @@ class SlaveJob (UpdateBase, Base):
         if 'hidden' in cols:
             self.hidden = payload['hidden']
 
+    @validates('msg')
+    def _validates(self, k, v):
+        max_len = getattr(self.__class__, k).prop.columns[0].type.length
+        if v and len(v) > max_len:
+            return v[:max_len]
+        return v
+
 
 class SlaveTask (UpdateBase, Base):
     __tablename__ = 'SlaveTask'

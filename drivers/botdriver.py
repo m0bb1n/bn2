@@ -727,6 +727,19 @@ class BotDriver (object):
         except Exception as e:
             error = str(e)
             self.log.error(traceback.format_exc(), path='@bd.router')
+            if route_meta.get('is_redirect', False):
+                route_meta['redirect_msg_id']
+                if self.BOT_TYPE == "MASTER":
+                    self.alert_CPv2(
+                        error,
+                        go_to=None,
+                        persist=False,
+                        session_id=route_meta['redirect_sid'],
+                        slave_uuid=route_meta['redirect_origin'],
+                        color='error',
+                        redirect_msg_id=route_meta['redirect_msg_id'],
+                        redirect_resp=True
+                    )
 
         else:
             error = None
@@ -741,6 +754,7 @@ class BotDriver (object):
             is_local = False
 
             is_global = self.is_route_global(cb_route)
+
 
 
             if self.model_tag == mt or cb_bot_type=='BOT' and not is_global:
