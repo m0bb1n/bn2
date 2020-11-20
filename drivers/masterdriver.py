@@ -466,19 +466,40 @@ class MasterDriver (BotDriver):
         pass
 
 
-    def alert_CPv2(self, msg, go_to=None, persist=False, color=None, slave_id=None, session_id=None, sids=[], slave_uuid=None,  slave_uuids=[], redirect_msg_id=None, redirect_resp=False, throw_error_no_CPv2=False):
+    def alert_CPv2(self, msg, go_to=None, persist=False, color=None, slave_id=None, session_id=None, sids=[], slave_uuid=None,  slave_uuids=[], redirect_msg_id=None, redirect_resp=False, resp_error=False, resp_warning=False, resp_ok=False, throw_error_no_CPv2=False):
         id_ = 'np-'+str(self.CPv2_alert_non_persist_id)
         self.CPv2_alert_non_persist_id+=1
         data = {'msg': msg, 'go_to': go_to, 'time': str(datetime.utcnow()), 'viewed': False, 'id':id_}
-        if color:
-            data['color'] = color
+
 
         if redirect_msg_id:
             data['redirect_msg_id'] = redirect_msg_id
         data['redirect_resp'] = redirect_resp
+        if redirect_resp:
+            resp_type = None
+            _color = None
+            if resp_error:
+                _color = 'error'
+                resp_type = 'error'
+            elif resp_warning:
+                _color = 'alert'
+                resp_type = 'warning'
+            else:
+                _color = 'primary'
+                resp_type = 'ok'
+
+            if not color:
+                color = _color
+            data['redirect_resp_type'] = resp_type
+
+        if color:
+            data['color'] = color
 
 
-        if session_id:
+        if session_id or sids:
+            if not slave_uuid:
+                raise ValueError("session id provided without slave uuid")
+            slave_uuids = []
             sids.append(session_id)
         if slave_uuid:
             slave_uuids.append(slave_uuid)
@@ -494,19 +515,13 @@ class MasterDriver (BotDriver):
                     slave_uuids.append(slave.uuid)
 
 
-        slave_cnt = len(slave_uuids)
-        if  slave_cnt> 1 or slave_cnt==0:
-            sids = []
-
         if not len(slave_uuids):
             sids = []
             with self.master_db.scoped_session() as session:
-                st = session.query(masterdb.SlaveType).filter(masterdb.SlaveType.model_tag=='CPv2').first()
                 slaves = session.query(masterdb.Slave)\
                     .filter(
-                        masterdb.Slave.slave_type_id==st.id,
-                        masterdb.Slave.active==True,
-                        masterdb.Slave.is_init==True
+                        masterdb.Slave.slave_type_id==self.MASTER_DB_SLAVE_TYPE_CPV2_ID,
+                        self.filter_slave_is_ready
                     ).all()
 
                 if not len(slaves):
@@ -525,13 +540,13 @@ class MasterDriver (BotDriver):
                 alert = self.master_db.as_json(alert)
 
         else:
-            for slave_uuid in slave_uuids:
+            for uuid in slave_uuids:
                 loc = create_local_task_message(
                     'bd.sd.@CPv2.users.alerts',
                     {"alerts":[alert], "sids": sids}
                 )
 
-                self.send_message_to(slave_uuid, loc)
+                self.send_message_to(uuid, loc)
         return True
 
 
@@ -2266,20 +2281,22 @@ class MasterDriver (BotDriver):
         self.send_message_to(uuid, msg, OUTBOX_SYS_MSG)
 
     def bd_md_Slave_CPv2_redirected(self, data, route_meta, token):
-        data['route_meta']['is_redirect'] = True
-        data['route_meta']['redirect_msg_id'] = data['__redirect_msg_id']
-        data['route_meta']['redirect_sid'] = data['sid']
-        data['route_meta']['redirect_origin'] = token['origin']
+        msg = create_local_task_message(data['route'], data['data'])
 
-        msg = create_local_task_message(data['route'], data['data'], route_meta=data['route_meta'])
+        msg['route_meta'] = route_meta
+        msg['route_meta']['is_redirect'] = True
+        msg['route_meta']['redirect_msg_id'] = data['__redirect_msg_id']
+        msg['route_meta']['redirect_sid'] = data['sid']
+        msg['route_meta']['redirect_origin'] = token['origin']
+
         self.inbox.put(msg, priority=INBOX_TASK1_MSG)
+
         self.alert_CPv2(
             data['__redirect_msg'],
             go_to=None,
             persist=False,
             session_id=data['sid'],
             slave_uuid=token['origin'],
-            color='grey darken-2',
             redirect_msg_id=data['__redirect_msg_id'],
             redirect_resp=True
         )

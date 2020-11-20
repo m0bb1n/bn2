@@ -60,9 +60,7 @@ def create_local_task_message(route, data, *, route_meta=None, **kwargs):
     if route_meta:
         safe_copy_route_meta(route_meta, meta)
 
-
     msg['route_meta'] = meta
-
 
     return msg
 

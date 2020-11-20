@@ -189,6 +189,7 @@ class BotServerFactory(protocol.Factory):
 
         payload['data']['route_meta'] = meta
         data = json.dumps(payload['data'], default=lambda o: str(o))
+        self.log.debug("OUTBOX << {}".format(payload['data']['route']))
 
         try:
             self.connections[uuid].send(data)

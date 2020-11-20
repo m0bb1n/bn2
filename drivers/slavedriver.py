@@ -250,10 +250,9 @@ class SlaveDriver (BotDriver):
                 pids.append(self.RUNNING_GLOBAL_TASK_PID)
                 if pids:
                     self.log.warning("Force stoping -- killing {} pids from global task: {}".format(len(pids), pids))
-                for pid in pids:
                     msg = self.create_local_task_message(
                         "@bd.process.kill",
-                        {"pid":pid}
+                        {"pids":pids}
                     )
                     self.inbox.put(msg, INBOX_SYS_CRITICAL_MSG)
 

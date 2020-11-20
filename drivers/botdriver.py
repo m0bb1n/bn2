@@ -603,10 +603,10 @@ class BotDriver (object):
         pids = data.get('pids', [])
         pids.append(data.get('pid', None))
 
+        self.log.warning('Trying to kill pids {}'.format(pids))
         for pid in pids:
             if pid:
-                self.log.warning('Trying to kill pid [{}]'.format(pid))
-                os.system('kill -9 {}'.format(pid))
+                os.system('kill -9 {} > /dev/null'.format(pid))
 
     def bd_process_died(self, data, route_meta):
         self.log.debug("Proccess died - route: {} Relaunch:{}".format(data['route'], data['relaunch']))
@@ -736,8 +736,8 @@ class BotDriver (object):
                         persist=False,
                         session_id=route_meta['redirect_sid'],
                         slave_uuid=route_meta['redirect_origin'],
-                        color='error',
                         redirect_msg_id=route_meta['redirect_msg_id'],
+                        resp_error=True,
                         redirect_resp=True
                     )
 

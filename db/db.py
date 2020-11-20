@@ -52,7 +52,7 @@ class ScopedSession(object):
 
 
 class DBWrapper (object):
-    def __init__(self, file_, base, sql_type, create=False, scoped_thread=False, tables_checking=[]):
+    def __init__(self, file_, base, sql_type, create=False, scoped_thread=False, tables_checking=[], **kwargs):
         self.tables_checking = tables_checking
         args = None
         engine_name = None
@@ -68,7 +68,7 @@ class DBWrapper (object):
         engine_name = engine_name + file_
 
         self.file = file_
-        self.engine = create_engine(engine_name, connect_args = connect_args)
+        self.engine = create_engine(engine_name, connect_args = connect_args, **kwargs)
         _Session = sessionmaker(bind=self.engine)
 
         self.SCOPED  = scoped_thread
