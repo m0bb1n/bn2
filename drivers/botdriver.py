@@ -734,7 +734,7 @@ class BotDriver (object):
                         error,
                         go_to=None,
                         persist=False,
-                        session_id=route_meta['redirect_sid'],
+                        sids=[route_meta['redirect_sid']],
                         slave_uuid=route_meta['redirect_origin'],
                         redirect_msg_id=route_meta['redirect_msg_id'],
                         resp_error=True,

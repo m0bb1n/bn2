@@ -466,7 +466,7 @@ class MasterDriver (BotDriver):
         pass
 
 
-    def alert_CPv2(self, msg, go_to=None, persist=False, color=None, slave_id=None, session_id=None, sids=[], slave_uuid=None,  slave_uuids=[], redirect_msg_id=None, redirect_resp=False, resp_error=False, resp_warning=False, resp_ok=False, throw_error_no_CPv2=False):
+    def alert_CPv2(self, msg, go_to=None, persist=False, color=None, slave_id=None, sids=[], slave_uuid=None,  slave_uuids=[], redirect_msg_id=None, redirect_resp=False, resp_error=False, resp_warning=False, resp_ok=False, throw_error_no_CPv2=False):
         id_ = 'np-'+str(self.CPv2_alert_non_persist_id)
         self.CPv2_alert_non_persist_id+=1
         data = {'msg': msg, 'go_to': go_to, 'time': str(datetime.utcnow()), 'viewed': False, 'id':id_}
@@ -495,12 +495,10 @@ class MasterDriver (BotDriver):
         if color:
             data['color'] = color
 
-
-        if session_id or sids:
+        if sids:
             if not slave_uuid:
                 raise ValueError("session id provided without slave uuid")
             slave_uuids = []
-            sids.append(session_id)
         if slave_uuid:
             slave_uuids.append(slave_uuid)
 
@@ -545,7 +543,6 @@ class MasterDriver (BotDriver):
                     'bd.sd.@CPv2.users.alerts',
                     {"alerts":[alert], "sids": sids}
                 )
-
                 self.send_message_to(uuid, loc)
         return True
 
@@ -579,7 +576,7 @@ class MasterDriver (BotDriver):
                 )
                 self.send_message_to(slave.uuid, msg)
         except Exception as e:
-            self.log.critical(traceback.print_exc(), path='bd.@md.log.uploads')
+            self.log.critical(traceback.format_exc(), path='bd.@md.log.uploads')
             raise e
 
 
@@ -2134,7 +2131,6 @@ class MasterDriver (BotDriver):
                     self.log.warning("Task [{}] was rejected by Slave [{}] -- Task is being requeued".format(task.id, slave.id))
 
     def bd_md_slave_task_schedule_add(self, data, route_meta):
-        #print 'Adding schedule for {}'.format(data['scheduler']['route'])
         ######
         #### DOESNT ACCOUNT FOR DIFFERENT WEEKDAY IN DIFFERENT TIMEZONES
         ######
@@ -2290,12 +2286,11 @@ class MasterDriver (BotDriver):
         msg['route_meta']['redirect_origin'] = token['origin']
 
         self.inbox.put(msg, priority=INBOX_TASK1_MSG)
-
         self.alert_CPv2(
             data['__redirect_msg'],
             go_to=None,
             persist=False,
-            session_id=data['sid'],
+            sids=[data['sid']],
             slave_uuid=token['origin'],
             redirect_msg_id=data['__redirect_msg_id'],
             redirect_resp=True
