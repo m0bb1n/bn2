@@ -312,7 +312,7 @@ class SlaveDriver (BotDriver):
         self.send_message_to_master(msg, OUTBOX_SYS_MSG)
 
 
-    def create_job_report(self, skeleton, _type='plaintext', default='{}', job_id=None):
+    def create_job_report(self, skeleton, _type='plaintext', default='', job_id=None):
         if not job_id:
             if not self.RUNNING_JOB_ID:
                 raise TypeError("job id is None")
@@ -381,12 +381,12 @@ class SlaveDriver (BotDriver):
 
 
         payload = {'table_name': table_name, 'rows': rows}
-        name = "Inserting {} rows in warehouse db table '{}'".format(len(rows), table_name)
+        name = "Inserting {} row(s) in warehouse db table '{}'".format(len(rows), table_name)
 
         self.add_global_task('bd.sd.@WCv2.model.insert', payload, name, job_id=job_id)
 
 
-    def update_WCv2(self, table_name, row, job_id=None, overwrite=False, name=None):
+    def update_WCv2(self, table_name, row, *, job_id:int=None, overwrite:bool=False, name:str=None, confirm_tag:str=None):
         if not job_id:
             if not self.RUNNING_JOB_ID:
                 raise TypeError("job id is None")
@@ -399,10 +399,9 @@ class SlaveDriver (BotDriver):
         else:
             rows = [row]
         if not name:
-            name = 'Modifying table "{}" in warehouse'.format(table_name)
-            name+= ' [{} row(s)]'.format(len(rows))
+            name = "Modifying {} row(s) in warehouse db table '{}'".format(len(rows), table_name)
 
-        payload = {'table_name': table_name, 'rows':rows, 'overwrite': overwrite}
+        payload = {'table_name': table_name, 'rows':rows, 'overwrite': overwrite, 'tag': confirm_tag}
         self.add_global_task('bd.sd.@WCv2.model.update', payload, name, job_id=job_id)
 
 
